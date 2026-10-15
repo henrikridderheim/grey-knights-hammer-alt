@@ -1,0 +1,611 @@
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 16px 64px;
+}
+
+.app-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.app-header h1 {
+  font-size: 26px;
+  margin-bottom: 4px;
+}
+
+.app-header .subtitle {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.credit {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  font-size: 17px;
+  margin-bottom: 12px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  margin: -4px -4px 0;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.card-header:hover {
+  background: var(--accent-bg);
+}
+
+.card-header h2 {
+  margin-bottom: 0;
+}
+
+.card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.card-header-badge {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.collapse-caret {
+  display: inline-block;
+  color: var(--text-dim);
+  font-size: 13px;
+  transition: transform 0.15s ease;
+}
+
+.collapse-caret.open {
+  transform: rotate(90deg);
+}
+
+/* When a section is open, its header still needs the same bottom margin the
+   old plain `<h2>` had before the body content — collapsed, there's no body
+   to separate from, so no margin is needed. */
+.card-header:has(+ *) {
+  margin-bottom: 12px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 480px) {
+  .form-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.field input,
+.field select {
+  width: 100%;
+}
+
+.field.span-2 {
+  grid-column: span 2;
+}
+
+.field.span-3 {
+  grid-column: 1 / -1;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  flex: none;
+}
+
+.primary-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.primary-btn:active {
+  opacity: 0.85;
+}
+
+.paste-textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.parse-result {
+  margin-top: 14px;
+}
+
+.parsed-unit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.parsed-unit-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.use-target-btn {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.unit-stratagem-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.unit-stratagem-row:last-child {
+  border-bottom: none;
+}
+
+.unit-stratagem-row .option-name {
+  margin-bottom: 4px;
+}
+
+.auto-unit-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.multiplicity-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 8px;
+}
+
+.auto-unit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.auto-option-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.counter-row {
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+}
+
+.counter-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.inline-stratagem-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 2px 0 4px;
+}
+
+.inline-stratagem-toggles .checkbox-row {
+  margin-top: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.defensive-toggle-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+
+.defensive-toggle-label {
+  display: block;
+  width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.half-range-toggle-row {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+}
+
+.ability-toggle-row {
+  border: 1px solid var(--accent, #6b5bd2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+
+.conditional-badge {
+  margin-left: 4px;
+  font-size: 10px;
+  color: #d6a94e;
+  border: 1px solid #d6a94e;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.ability-unmodeled {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  font-style: italic;
+}
+
+/* Threat figures read as a warning (danger to the player), not a win. */
+.threat-figure {
+  color: #e06c6c;
+  font-weight: 600;
+}
+
+.threat-verdict {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 10px;
+  background: var(--bg);
+}
+
+.auto-combo-row {
+  border-top: 1px dashed var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+  font-weight: 600;
+}
+
+.auto-option-clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: 0 -6px;
+}
+
+.auto-option-clickable:hover {
+  background: var(--accent-bg);
+}
+
+.auto-weapon-breakdown {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 2px 6px 6px;
+}
+
+/* Scoped to direct rows only (not `.auto-weapon-breakdown div`, which used to
+   match every div at any depth — including inside `.final-damage`, flattening
+   its title/bar/rows into one unreadable horizontal flex line). */
+.auto-combo-members > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 1px 0;
+}
+
+.unresolved-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.unresolved-line {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--bad);
+  padding: 2px 0;
+}
+
+.section-note {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.sort-row select {
+  flex: 1;
+}
+
+.option-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  background: var(--bg-card);
+}
+
+.option-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.option-rank {
+  color: var(--text-dim);
+  font-size: 13px;
+  min-width: 20px;
+}
+
+.option-name {
+  font-weight: 600;
+  color: var(--text-h);
+  flex: 1;
+}
+
+/* My own army's unit names specifically (Purifier Squad, GMND, Interceptors,
+   etc.) — a stronger accent treatment than the generic `.option-name` (which
+   is also used for opponent-unit headers), so my units are easy to pick out
+   at a glance while scanning a card full of numbers. */
+.my-unit-name {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.option-scenario {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.option-stats {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.stat-value {
+  font-weight: 700;
+  color: var(--text-h);
+  font-size: 15px;
+}
+
+.kill-good {
+  color: var(--good);
+}
+
+.kill-bad {
+  color: var(--text-dim);
+}
+
+.option-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 13px;
+}
+
+.final-damage {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-bg);
+}
+
+.final-damage-title {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.final-damage-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.final-damage-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), #38bdf8);
+}
+
+.final-damage-rows div {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-top: 1px dashed var(--border);
+  font-size: 13px;
+}
+
+.final-damage-rows div:first-child {
+  border-top: none;
+}
+
+.hint {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: help;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.detail-grid div span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.weapon-breakdown div {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.weapon-breakdown-table {
+  overflow-x: auto;
+  margin: 6px 0 4px;
+  font-size: 12px;
+}
+
+.weapon-breakdown-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.8fr 0.8fr 1fr 1.1fr 1fr;
+  gap: 6px;
+  padding: 4px 6px;
+  min-width: 480px;
+}
+
+.weapon-breakdown-row:not(.weapon-breakdown-header):nth-child(even) {
+  background: var(--accent-bg);
+  border-radius: 4px;
+}
+
+.weapon-breakdown-header {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.weapon-breakdown-row span:not(:first-child) {
+  text-align: right;
+}
+
+.sequencing-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.sequencing-order {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+
+.sequencing-order-title {
+  display: block;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.sequencing-order ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.sequencing-order li {
+  padding: 1px 0;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 24px 0;
+  font-size: 14px;
+}
+
+.loading-state {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 24px 0;
+  font-size: 14px;
+}

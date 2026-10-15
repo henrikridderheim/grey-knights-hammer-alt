@@ -1,0 +1,452 @@
+import { d6, rollDiceSpec } from "./dice";
+import type { AttackContext, DefenseModelGroup } from "./types";
+
+/**
+ * Simplifying assumptions, documented because the live 11e rules leave some of
+ * this to player choice during a real game:
+ * - Re-roll abilities (e.g. [TWIN-LINKED], Sanctity of Purpose re-rolls) are applied
+ *   optimally: reroll iff the first roll did not succeed. We never "fish" a
+ *   pass for a better (critical) result.
+ * - When a defender has more than one eligible fresh (undamaged) model to
+ *   allocate a failed save to, we fill defense groups in the order given
+ *   rather than modeling optimal defender choice.
+ * - Feel No Pain is applied to both normal failed-save damage and to
+ *   Devastating Wounds mortal wounds, per point of damage, as per its
+ *   standard wording.
+ * - Save threshold (Sv/InvSv) is computed from the first non-character group.
+ *   Exact for a single-profile target (the common case); a simplification for
+ *   a genuinely mixed-save squad.
+ */
+
+export interface RerollFlags {
+  hitRerollOnes?: boolean; // e.g. Sigil of the Hunt grants re-roll Hit roll of 1
+  woundRerollOnes?: boolean; // e.g. Sanctity of Purpose grants re-roll Wound roll of 1
+  /** Sanctity of Purpose (Purifier Squad), upgraded: re-roll any failed Wound
+   * roll (not just a 1) when the target is within range of an objective
+   * marker. Takes priority over woundRerollOnes when both are set. */
+  woundRerollAllFailed?: boolean;
+}
+
+export interface EngagementResult {
+  damageDealt: number;
+  modelsKilled: number;
+  woundsRemaining: number;
+  startingWounds: number;
+  unitWiped: boolean;
+  /** Attack-sequence stage breakdown for a single-weapon engagement — see
+   * `FireWeaponResult`. Not meaningful on `simulateUnitPhase`'s combined
+   * result (multiple weapons' stages summed together), only on
+   * `simulateEngagement`'s single-weapon one. */
+  totalAttacks: number;
+  hits: number;
+  woundsDealt: number;
+  unsavedWounds: number;
+}
+
+export interface Pool {
+  group: DefenseModelGroup;
+  modelsAlive: number;
+  currentModelWoundsLeft: number;
+}
+
+export interface TargetPools {
+  nonCharPools: Pool[];
+  charPools: Pool[];
+  totalModelsStart: number;
+}
+
+export function buildTargetPools(target: AttackContext["target"]): TargetPools {
+  const nonCharacterGroups = target.groups.filter((g) => !g.isAttachedCharacter);
+  const characterGroups = target.groups.filter((g) => g.isAttachedCharacter);
+  return {
+    nonCharPools: makePools(nonCharacterGroups),
+    charPools: makePools(characterGroups),
+    totalModelsStart: target.groups.reduce((sum, g) => sum + g.count, 0),
+  };
+}
+
+function makePools(groups: DefenseModelGroup[]): Pool[] {
+  return groups.map((g) => ({
+    group: g,
+    modelsAlive: g.count,
+    currentModelWoundsLeft: g.wounds,
+  }));
+}
+
+export function totalWoundsRemaining(pools: Pool[]): number {
+  return pools.reduce((sum, p) => {
+    if (p.modelsAlive <= 0) return sum;
+    return sum + p.currentModelWoundsLeft + (p.modelsAlive - 1) * p.group.wounds;
+  }, 0);
+}
+
+export function totalModelsAlive(pools: Pool[]): number {
+  return pools.reduce((sum, p) => sum + p.modelsAlive, 0);
+}
+
+function applyFeelNoPain(rawDamage: number, feelNoPain: number | undefined, rng: () => number): number {
+  if (!feelNoPain || rawDamage <= 0) return rawDamage;
+  let effective = 0;
+  for (let i = 0; i < rawDamage; i++) {
+    if (d6(rng) < feelNoPain) effective++;
+  }
+  return effective;
+}
+
+/** Apply `damage` points to the next available model(s) in this pool. Excess from a
+ * single attack that kills the current model is lost (no overflow), per verified 11e rule. */
+function applyDamageToPool(pool: Pool, damage: number, feelNoPain: number | undefined, rng: () => number): number {
+  if (pool.modelsAlive <= 0 || damage <= 0) return 0;
+  const effectiveDamage = applyFeelNoPain(damage, feelNoPain, rng);
+  if (effectiveDamage <= 0) return 0;
+  // Excess beyond the current model's remaining wounds is lost, not carried to the next model.
+  const dealt = Math.min(effectiveDamage, pool.currentModelWoundsLeft);
+  pool.currentModelWoundsLeft -= dealt;
+  if (pool.currentModelWoundsLeft <= 0) {
+    pool.modelsAlive -= 1;
+    pool.currentModelWoundsLeft = pool.modelsAlive > 0 ? pool.group.wounds : 0;
+  }
+  return dealt;
+}
+
+function saveThreshold(group: DefenseModelGroup, ap: number): { threshold: number; usesInvuln: boolean } {
+  const armor = group.save + ap;
+  const invuln = group.invulnSave ?? 8; // 8 = effectively "never" (impossible on a d6)
+  if (invuln < armor) return { threshold: invuln, usesInvuln: true };
+  return { threshold: armor, usesInvuln: false };
+}
+
+function woundThreshold(strength: number, toughness: number): number {
+  if (strength >= toughness * 2) return 2;
+  if (strength > toughness) return 3;
+  if (strength === toughness) return 4;
+  if (strength * 2 > toughness) return 5;
+  return 6;
+}
+
+function clampMod(mod: number): number {
+  return Math.max(-1, Math.min(1, mod));
+}
+
+function pickRepresentativeGroup(
+  nonCharacterGroups: DefenseModelGroup[],
+  characterGroups: DefenseModelGroup[]
+): DefenseModelGroup | undefined {
+  return nonCharacterGroups[0] ?? characterGroups[0];
+}
+
+/** One weapon's full attack-sequence result, broken down by stage — matches
+ * the "Weapon Results" table format (Attacks / Hits / Wounds Dealt / Unsaved
+ * Wounds / Damage Dealt) used elsewhere in the hobby's mathhammer tools. */
+export interface FireWeaponResult {
+  totalAttacks: number;
+  hits: number;
+  /** Successful wound rolls (including auto-wounds from Lethal Hits and
+   * wounds that bypass the save via Devastating Wounds) — i.e. wounds that
+   * got past the wound roll, before saves are considered. */
+  woundsDealt: number;
+  /** Wounds that failed their save (or bypassed it via Devastating Wounds,
+   * which always deals damage) — the count that actually reaches the
+   * damage-rolling stage. */
+  unsavedWounds: number;
+  damageDealt: number;
+}
+
+/**
+ * Fire one weapon against shared, mutable target pools (used both for a single-weapon
+ * engagement and for combining multiple weapons from the same unit in one phase, so
+ * overkill/model-death is correctly shared rather than each weapon seeing a fresh target).
+ */
+export function fireWeaponAtPools(
+  ctx: AttackContext,
+  pools: TargetPools,
+  rng: () => number,
+  rerolls: RerollFlags = {}
+): FireWeaponResult {
+  const { weapon, target, numAttackingModels } = ctx;
+  const w = weapon.keywords;
+  const { nonCharPools, charPools } = pools;
+  const nonCharacterGroups = nonCharPools.map((p) => p.group);
+  const characterGroups = charPools.map((p) => p.group);
+
+  // --- Gather attack dice ---
+  let totalAttacks = 0;
+  const rapidFireBonus = ctx.halfRange && w.rapidFire ? w.rapidFire : 0;
+  const blastBonus =
+    w.blast && target.modelCountForBlast > 0 ? Math.floor(target.modelCountForBlast / 5) : 0;
+  const attacksBonus = ctx.attacksBonus ?? 0;
+  for (let m = 0; m < numAttackingModels; m++) {
+    totalAttacks += rollDiceSpec(weapon.attacks, rng) + rapidFireBonus + blastBonus + attacksBonus;
+  }
+
+  // Toughness for wound rolls: if target is an attached unit, use the highest T
+  // among bodyguard (non-character) models on the battlefield (verified 11e rule).
+  const effectiveToughness = target.isAttached
+    ? Math.max(...nonCharacterGroups.map((g) => g.toughness), 0)
+    : nonCharacterGroups[0]?.toughness ?? characterGroups[0]?.toughness ?? 0;
+
+  // [ANTI-X Y+] only triggers against a target that actually has keyword X —
+  // it does not universally upgrade wound rolls against everything.
+  const antiThresholds: number[] = [];
+  if (w.antiKeyword && w.antiThreshold && target.keywords.includes(w.antiKeyword)) {
+    antiThresholds.push(w.antiThreshold);
+  }
+  if (ctx.grantAnti && target.keywords.includes(ctx.grantAnti.keyword.toUpperCase())) {
+    antiThresholds.push(ctx.grantAnti.threshold);
+  }
+  const antiThreshold = antiThresholds.length > 0 ? Math.min(...antiThresholds) : null;
+  const antiApplies = antiThreshold !== null;
+  // [MELTA X]: add X to the weapon's Damage characteristic when the target was within half range.
+  const meltaBonus = ctx.halfRange && w.melta ? w.melta : 0;
+  // Defensive -1 to Damage (target's own toggle): floored at 1 per attack —
+  // damage is never reduced to 0 or below by this.
+  const rollWeaponDamage = () =>
+    Math.max(1, rollDiceSpec(weapon.damage, rng) + meltaBonus - (ctx.damageReduction ?? 0));
+
+  interface WoundingAttack {
+    saveRoll: number;
+    failed: boolean;
+    damage: number;
+    isPrecisionEligible: boolean;
+  }
+  const woundingAttacks: WoundingAttack[] = [];
+  const devastatingMortalWounds: { damage: number; isPrecisionEligible: boolean }[] = [];
+
+  const effectiveStrength = weapon.strength + ctx.strengthBonus;
+  const sustainedHitsX = (w.sustainedHits ?? 0) + (ctx.bonusSustainedHits ?? 0);
+  const devastatingActive = !!w.devastatingWounds || !!ctx.grantDevastatingWounds;
+  const lethalActive = !!w.lethalHits || !!ctx.grantLethalHits;
+
+  // --- Hit roll (with Sustained/Lethal Hits generating bonus/auto-wound hits) ---
+  let hits = 0;
+  let lethalHitWounds = 0; // hits that auto-wound (skip wound roll)
+  const doHitRoll = () => {
+    if (w.torrent) {
+      hits += 1;
+      return;
+    }
+    let roll = d6(rng);
+    if (roll === 1 && rerolls.hitRerollOnes) roll = d6(rng);
+    if (roll === 1) return; // always fails
+    const isCrit = roll === 6;
+    if (!isCrit) {
+      const modified = roll + clampMod(ctx.hitMod);
+      if (modified < weapon.skill) return; // miss
+    }
+    hits += 1;
+    if (isCrit) {
+      if (sustainedHitsX > 0) hits += sustainedHitsX;
+      if (lethalActive) lethalHitWounds += 1;
+    }
+  };
+  for (let i = 0; i < totalAttacks; i++) doHitRoll();
+
+  const normalHits = hits - lethalHitWounds;
+
+  // Defensive -1 to AP (target's own toggle): floored at 0 — an attack's AP
+  // can never become "better than no penalty" for the defender.
+  const effectiveAp = Math.max(0, weapon.ap + (ctx.apBonus ?? 0) - (ctx.apReduction ?? 0));
+
+  const resolveSave = (isPrecisionEligible: boolean) => {
+    const targetGroup = pickRepresentativeGroup(nonCharacterGroups, characterGroups);
+    if (!targetGroup) return;
+    const { threshold } = saveThreshold(targetGroup, effectiveAp);
+    const saveRoll = d6(rng);
+    const failed = saveRoll === 1 || saveRoll < threshold;
+    woundingAttacks.push({
+      saveRoll,
+      failed,
+      damage: failed ? rollWeaponDamage() : 0,
+      isPrecisionEligible,
+    });
+  };
+
+  // `applyModifier: false` decides only whether a roll fails on its own raw
+  // (unmodified) terms — used purely to decide whether a reroll is
+  // triggered. Per core rules, "you must always reroll a dice roll before
+  // applying any modifier to that roll": whether a roll counts as a
+  // "failure" worth rerolling is judged before the -1/+1 modifier is
+  // applied, not after. `applyModifier: true` is the real, final result
+  // (after any reroll) that actually resolves the attack. Using the
+  // modifier-inclusive result to decide the reroll would let a defensive
+  // -1-to-Wound toggle (or any wound modifier) retroactively "rescue" a roll
+  // that raw-succeeded into a reroll it was never entitled to — verified
+  // this was happening before this fix (a twin-linked weapon under -1 to
+  // Wound showed ~0.75 wound probability where the correct sequencing gives
+  // ~0.667, a real ~12% overstatement).
+  const evaluateWoundRoll = (roll: number, applyModifier: boolean): { success: boolean; isCritWound: boolean } => {
+    if (roll === 1) return { success: false, isCritWound: false };
+    let isCritWound = roll === 6;
+    if (!isCritWound && antiApplies) {
+      // Anti-X uses the UNMODIFIED wound roll.
+      if (roll >= (antiThreshold as number)) isCritWound = true;
+    }
+    let success = isCritWound;
+    if (!success) {
+      // Rugged Resilience: -1 to the wound roll when the attack's Strength
+      // exceeds this unit's Toughness. Combined with any defensive -1-to-Wound
+      // toggle, then clamped, so the net modifier still respects the ±1 cap.
+      const ruggedPenalty = target.ruggedResilience && effectiveStrength > effectiveToughness ? -1 : 0;
+      const effectiveRoll = applyModifier ? roll + clampMod(ctx.woundMod + ruggedPenalty) : roll;
+      success = effectiveRoll >= woundThreshold(effectiveStrength, effectiveToughness);
+    }
+    return { success, isCritWound };
+  };
+
+  let woundsDealt = 0; // successful wound rolls, before saves are considered
+
+  const doWoundRoll = (isPrecisionEligible: boolean) => {
+    let roll = d6(rng);
+    const rawResult = evaluateWoundRoll(roll, false);
+    // [TWIN-LINKED], Sanctity of Purpose's "re-roll any failed Wound roll"
+    // upgrade, and a plain re-roll-1s ability (e.g. Sigil of the Hunt) all only
+    // ever re-roll a roll that actually failed — never fish a pass for a
+    // better (critical) result. The decision is made on the RAW roll (see
+    // `evaluateWoundRoll` above), not the modifier-adjusted one.
+    const shouldReroll =
+      !rawResult.success &&
+      (w.twinLinked || rerolls.woundRerollAllFailed || (rerolls.woundRerollOnes && roll === 1));
+    if (shouldReroll) {
+      roll = d6(rng);
+    }
+    const result = evaluateWoundRoll(roll, true);
+    if (!result.success) return;
+    woundsDealt += 1;
+
+    if (result.isCritWound && devastatingActive) {
+      devastatingMortalWounds.push({ damage: rollWeaponDamage(), isPrecisionEligible });
+      return;
+    }
+    resolveSave(isPrecisionEligible);
+  };
+
+  for (let i = 0; i < normalHits; i++) doWoundRoll(false);
+  // Lethal-hit auto-wounds still go through the save step (they only skip the wound roll).
+  for (let i = 0; i < lethalHitWounds; i++) {
+    woundsDealt += 1;
+    resolveSave(false);
+  }
+
+  // --- Resolve normal damage, ascending order of save roll result (verified 11e rule) ---
+  const failedSaves = woundingAttacks.filter((a) => a.failed).sort((a, b) => a.saveRoll - b.saveRoll);
+  let damageDealt = 0;
+  const canPrecision = !!w.precision && ctx.usePrecisionOnCharacter && charPools.length > 0;
+  for (const atk of failedSaves) {
+    if (canPrecision && atk.isPrecisionEligible && charPools.some((p) => p.modelsAlive > 0)) {
+      const pool = charPools.find((p) => p.modelsAlive > 0)!;
+      damageDealt += applyDamageToPool(pool, atk.damage, pool.group.feelNoPain, rng);
+    } else {
+      // Once every Bodyguard model is dead, the attached Character(s) are no
+      // longer shielded from normal (non-Precision) targeting — they're just
+      // the last model(s) left in the unit. Fall back to the character pool
+      // rather than dropping the damage on the floor.
+      const pool = nonCharPools.find((p) => p.modelsAlive > 0) ?? charPools.find((p) => p.modelsAlive > 0);
+      if (pool) damageDealt += applyDamageToPool(pool, atk.damage, pool.group.feelNoPain, rng);
+    }
+  }
+
+  // --- Resolve Devastating Wounds mortal wounds (after normal damage, per verified rule) ---
+  for (const dw of devastatingMortalWounds) {
+    if (canPrecision && dw.isPrecisionEligible && charPools.some((p) => p.modelsAlive > 0)) {
+      const pool = charPools.find((p) => p.modelsAlive > 0)!;
+      const cappedDamage = Math.min(dw.damage, pool.currentModelWoundsLeft);
+      damageDealt += applyDamageToPool(pool, cappedDamage, pool.group.feelNoPain, rng);
+    } else {
+      // Same fallback as normal damage above: an all-Character unit (Bodyguard
+      // wiped) is a normal target for mortal wounds too.
+      const pool = nonCharPools.find((p) => p.modelsAlive > 0) ?? charPools.find((p) => p.modelsAlive > 0);
+      if (pool) {
+        const cappedDamage = Math.min(dw.damage, pool.currentModelWoundsLeft);
+        damageDealt += applyDamageToPool(pool, cappedDamage, pool.group.feelNoPain, rng);
+      }
+    }
+  }
+
+  return {
+    totalAttacks,
+    hits,
+    woundsDealt,
+    unsavedWounds: failedSaves.length + devastatingMortalWounds.length,
+    damageDealt,
+  };
+}
+
+/** Single-weapon convenience wrapper (used directly by unit tests). */
+export function simulateEngagement(
+  ctx: AttackContext,
+  rng: () => number,
+  rerolls: RerollFlags = {}
+): EngagementResult {
+  const pools = buildTargetPools(ctx.target);
+  const startingWounds = totalWoundsRemaining(pools.nonCharPools) + totalWoundsRemaining(pools.charPools);
+  const fireResult = fireWeaponAtPools(ctx, pools, rng, rerolls);
+  const woundsRemaining = totalWoundsRemaining(pools.nonCharPools) + totalWoundsRemaining(pools.charPools);
+  const aliveNow = totalModelsAlive(pools.nonCharPools) + totalModelsAlive(pools.charPools);
+  return {
+    damageDealt: fireResult.damageDealt,
+    modelsKilled: pools.totalModelsStart - aliveNow,
+    woundsRemaining,
+    startingWounds,
+    unitWiped: aliveNow === 0,
+    totalAttacks: fireResult.totalAttacks,
+    hits: fireResult.hits,
+    woundsDealt: fireResult.woundsDealt,
+    unsavedWounds: fireResult.unsavedWounds,
+  };
+}
+
+/**
+ * Fire multiple weapons (e.g. all of a unit's ranged weapons) against ONE shared target
+ * in a single phase, so overkill/model-death carries correctly across weapons instead of
+ * each weapon seeing a full-health target.
+ */
+export function simulateUnitPhase(
+  engagements: { ctx: AttackContext; rerolls?: RerollFlags }[],
+  rng: () => number
+): EngagementResult & { damageByWeapon: number[] } {
+  if (engagements.length === 0) {
+    return {
+      damageDealt: 0,
+      modelsKilled: 0,
+      woundsRemaining: 0,
+      startingWounds: 0,
+      unitWiped: false,
+      totalAttacks: 0,
+      hits: 0,
+      woundsDealt: 0,
+      unsavedWounds: 0,
+      damageByWeapon: [],
+    };
+  }
+  const pools = buildTargetPools(engagements[0].ctx.target);
+  const startingWounds = totalWoundsRemaining(pools.nonCharPools) + totalWoundsRemaining(pools.charPools);
+  const damageByWeapon: number[] = [];
+  let damageDealt = 0;
+  let totalAttacks = 0;
+  let hits = 0;
+  let woundsDealt = 0;
+  let unsavedWounds = 0;
+  for (const { ctx, rerolls } of engagements) {
+    const fireResult = fireWeaponAtPools(ctx, pools, rng, rerolls);
+    damageByWeapon.push(fireResult.damageDealt);
+    damageDealt += fireResult.damageDealt;
+    totalAttacks += fireResult.totalAttacks;
+    hits += fireResult.hits;
+    woundsDealt += fireResult.woundsDealt;
+    unsavedWounds += fireResult.unsavedWounds;
+  }
+  const woundsRemaining = totalWoundsRemaining(pools.nonCharPools) + totalWoundsRemaining(pools.charPools);
+  const aliveNow = totalModelsAlive(pools.nonCharPools) + totalModelsAlive(pools.charPools);
+  return {
+    damageDealt,
+    modelsKilled: pools.totalModelsStart - aliveNow,
+    woundsRemaining,
+    startingWounds,
+    unitWiped: aliveNow === 0,
+    totalAttacks,
+    hits,
+    woundsDealt,
+    unsavedWounds,
+    damageByWeapon,
+  };
+}
